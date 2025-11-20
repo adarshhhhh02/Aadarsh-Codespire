@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevMind | AI Developer Toolkit</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Marked for Markdown Rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- PrismJS for Syntax Highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom Styles -->
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .code-input {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            background-color: #1e293b;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569; 
+        }
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .markdown-body h1 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.5em; color: #60a5fa; }
+        .markdown-body h2 { font-size: 1.25em; font-weight: bold; margin-top: 1em; margin-bottom: 0.5em; color: #93c5fd; }
+        .markdown-body p { margin-bottom: 1em; line-height: 1.6; }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+        .markdown-body code { background-color: #334155; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+        .markdown-body pre { background-color: #1e293b; padding: 1em; border-radius: 8px; overflow-x: auto; margin-bottom: 1em; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Icons Components (using Lucide names for reference, rendered as SVGs) ---
+        // We will use lucide.createIcons inside useEffect, but for React, we need SVG wrappers or a helper.
+        // Simple helper to render Lucide icons in React
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const iconRef = useRef(null);
+            
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons({
+                        root: iconRef.current,
+                        nameAttrs: {
+                            'data-lucide': name 
+                        },
+                        attrs: {
+                            class: `lucide lucide-${name} ${className}`,
+                            width: size,
+                            height: size
+                        }
+                    });
+                }
+            }, [name, className, size]);
+
+            return <i ref={iconRef} data-lucide={name}></i>;
+        };
+
+        // --- Utility: Gemini API Call ---
+        const callGemini = async (apiKey, prompt, imageBase64 = null, systemInstruction = "") => {
+            if (!apiKey) throw new Error("API Key is missing");
+
+            const model = "gemini-2.5-flash-preview-09-2025";
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+            const parts = [{ text: prompt }];
+            if (imageBase64) {
+                // Clean base64 string if it has the data:image prefix
+                const cleanBase64 = imageBase64.split(',')[1] || imageBase64;
+                parts.push({
+                    inlineData: {
+                        mimeType: "image/png", // Assuming PNG/JPEG. Gemini handles generic image data well.
+                        data: cleanBase64
+                    }
+                });
+            }
+
+            const payload = {
+                contents: [{ parts: parts }]
+            };
+            
+            if(systemInstruction) {
+                payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+            }
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error?.message || "Failed to fetch from Gemini");
+            }
+
+            const data = await response.json();
+            return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
+        };
+
+        // --- Components ---
+
+        const ToolCard = ({ active, title, icon, onClick }) => (
+            <button 
+                onClick={onClick}
+                className={`flex items-center gap-3 w-full p-3 rounded-lg transition-all duration-200 ${
+                    active 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                }`}
+            >
+                <Icon name={icon} size={20} />
+                <span className="font-medium">{title}</span>
+            </button>
+        );
+
+        const FileUploader = ({ onImageSelect, selectedImage }) => {
+            const handleFile = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => onImageSelect(reader.result);
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            return (
+                <div className="w-full mb-4">
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${selectedImage ? 'border-green-500 bg-green-500/10' : 'border-slate-600 hover:bg-slate-800'}`}>
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            {selectedImage ? (
+                                <div className="flex items-center gap-2 text-green-400">
+                                    <Icon name="check-circle" size={24} />
+                                    <p className="text-sm">Image Loaded</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <Icon name="upload-cloud" className="text-slate-400 mb-2" size={24} />
+                                    <p className="text-sm text-slate-400">Click or drag screenshot here</p>
+                                </>
+                            )}
+                        </div>
+                        <input type="file" className="hidden" accept="image/*" onChange={handleFile} />
+                    </label>
+                    {selectedImage && (
+                        <img src={selectedImage} alt="Preview" className="h-32 w-auto object-contain mx-auto mt-2 rounded border border-slate-700" />
+                    )}
+                </div>
+            );
+        };
+
+        const MarkdownViewer = ({ content }) => {
+            useEffect(() => {
+                if (window.Prism) window.Prism.highlightAll();
+            }, [content]);
+
+            const createMarkup = () => {
+                return { __html: marked.parse(content) };
+            };
+
+            return (
+                <div 
+                    className="markdown-body text-slate-300 text-sm overflow-y-auto max-h-[60vh] p-4 bg-slate-900/50 rounded-lg border border-slate-700"
+                    dangerouslySetInnerHTML={createMarkup()}
+                />
+            );
+        };
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('snap');
+            const [apiKey, setApiKey] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState('');
+            
+            // Inputs
+            const [inputImage, setInputImage] = useState(null);
+            const [inputText, setInputText] = useState('');
+            const [inputContext, setInputContext] = useState('');
+
+            // Tools Configuration
+            const tools = {
+                snap: {
+                    id: 'snap',
+                    title: 'Snap & Explain',
+                    icon: 'camera',
+                    description: 'Upload a screenshot of code. AI will transcribe and explain it.',
+                    requiresImage: true,
+                    systemPrompt: "You are an expert Developer. Analyze the provided code screenshot. 1. Transcribe the code accurately in a markdown code block. 2. Explain step-by-step what the code does. 3. Identify any potential bugs or optimizations."
+                },
+                debug: {
+                    id: 'debug',
+                    title: 'Debug Mate',
+                    icon: 'bug',
+                    description: 'Paste broken code and error messages. AI will find the fix.',
+                    requiresImage: false,
+                    hasContextInput: true, // For error logs
+                    contextLabel: "Error Logs / Context",
+                    textLabel: "Broken Code",
+                    systemPrompt: "You are a senior debugging assistant. Analyze the provided code and the error log. 1. Identify the root cause. 2. Provide the corrected code. 3. Explain why the fix works."
+                },
+                docs: {
+                    id: 'docs',
+                    title: 'Auto Docs',
+                    icon: 'file-text',
+                    description: 'Generate professional JSDoc and Markdown documentation for your code.',
+                    requiresImage: false,
+                    textLabel: "Source Code",
+                    systemPrompt: "You are a technical writer. 1. Add comprehensive JSDoc/Comments to the provided code. 2. Generate a brief Markdown documentation summary describing inputs, outputs, and usage examples."
+                },
+                builder: {
+                    id: 'builder',
+                    title: 'Sketch2App',
+                    icon: 'layout',
+                    description: 'Upload a wireframe sketch. AI will write the React/Tailwind code.',
+                    requiresImage: true,
+                    systemPrompt: "You are an expert Frontend Engineer. Analyze the hand-drawn UI sketch. Convert it into a single-file React functional component using Tailwind CSS for styling. Ensure it is responsive and looks modern. Output ONLY the code within a markdown block."
+                }
+            };
+
+            const handleGenerate = async () => {
+                if (!apiKey) {
+                    alert("Please enter your Gemini API Key first.");
+                    return;
+                }
+
+                setLoading(true);
+                setResult('');
+
+                try {
+                    const currentTool = tools[activeTab];
+                    let prompt = inputText;
+
+                    // Construct prompt based on tool
+                    if (activeTab === 'snap') prompt = "Analyze this screenshot.";
+                    if (activeTab === 'builder') prompt = "Turn this sketch into React code.";
+                    if (activeTab === 'debug') prompt = `CODE:\n${inputText}\n\nCONTEXT/ERRORS:\n${inputContext}`;
+                    
+                    const data = await callGemini(
+                        apiKey, 
+                        prompt, 
+                        currentTool.requiresImage ? inputImage : null,
+                        currentTool.systemPrompt
+                    );
+                    
+                    setResult(data);
+                } catch (error) {
+                    setResult(`**Error:** ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const copyToClipboard = () => {
+                navigator.clipboard.writeText(result);
+                // Ideally show a toast here
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row">
+                    
+                    {/* Sidebar */}
+                    <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
+                        <div className="p-6 border-b border-slate-800 flex items-center gap-2">
+                            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                                <Icon name="cpu" className="text-white" size={20} />
+                            </div>
+                            <h1 className="font-bold text-xl tracking-tight text-white">DevMind</h1>
+                        </div>
+
+                        <div className="p-4 space-y-2 flex-1">
+                            {Object.values(tools).map(tool => (
+                                <ToolCard 
+                                    key={tool.id}
+                                    {...tool}
+                                    active={activeTab === tool.id}
+                                    onClick={() => {
+                                        setActiveTab(tool.id);
+                                        setResult('');
+                                        setInputText('');
+                                        setInputImage(null);
+                                        setInputContext('');
+                                    }}
+                                />
+                            ))}
+                        </div>
+
+                        <div className="p-4 border-t border-slate-800">
+                            <label className="block text-xs text-slate-500 uppercase font-bold mb-2">API Key</label>
+                            <div className="flex items-center gap-2 bg-slate-800 rounded px-3 py-2 border border-slate-700">
+                                <Icon name="key" size={14} className="text-slate-400" />
+                                <input 
+                                    type="password" 
+                                    placeholder="Gemini API Key"
+                                    className="bg-transparent text-sm text-white w-full focus:outline-none"
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                />
+                            </div>
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-xs text-blue-400 mt-2 block hover:underline text-center">Get API Key</a>
+                        </div>
+                    </aside>
+
+                    {/* Main Content */}
+                    <main className="flex-1 p-4 md:p-8 overflow-y-auto">
+                        <div className="max-w-4xl mx-auto">
+                            
+                            {/* Header */}
+                            <div className="mb-8">
+                                <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
+                                    {tools[activeTab].title}
+                                </h2>
+                                <p className="text-slate-400">{tools[activeTab].description}</p>
+                            </div>
+
+                            {/* Input Area */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                
+                                <div className="space-y-4">
+                                    <div className="glass-panel p-4 rounded-xl">
+                                        
+                                        {/* Image Input */}
+                                        {tools[activeTab].requiresImage && (
+                                            <FileUploader onImageSelect={setInputImage} selectedImage={inputImage} />
+                                        )}
+
+                                        {/* Text Input (Code) */}
+                                        {!tools[activeTab].requiresImage && (
+                                            <div className="mb-4">
+                                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                                    {tools[activeTab].textLabel || "Input"}
+                                                </label>
+                                                <textarea
+                                                    className="w-full h-48 bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm code-input text-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                                                    placeholder="// Paste your code here..."
+                                                    value={inputText}
+                                                    onChange={(e) => setInputText(e.target.value)}
+                                                ></textarea>
+                                            </div>
+                                        )}
+
+                                        {/* Context Input (Errors) */}
+                                        {tools[activeTab].hasContextInput && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                                    {tools[activeTab].contextLabel}
+                                                </label>
+                                                <textarea
+                                                    className="w-full h-24 bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-red-300 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                                                    placeholder="Error messages, stack traces, or specific questions..."
+                                                    value={inputContext}
+                                                    onChange={(e) => setInputContext(e.target.value)}
+                                                ></textarea>
+                                            </div>
+                                        )}
+
+                                        {/* Action Button */}
+                                        <button
+                                            onClick={handleGenerate}
+                                            disabled={loading || (!inputText && !inputImage)}
+                                            className={`w-full mt-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
+                                                loading 
+                                                ? 'bg-slate-700 cursor-not-allowed text-slate-400' 
+                                                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20'
+                                            }`}
+                                        >
+                                            {loading ? (
+                                                <>
+                                                    <div className="loader"></div>
+                                                    <span>Processing...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Icon name="sparkles" size={18} />
+                                                    <span>Generate Solution</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Output Area */}
+                                <div className="flex flex-col h-full min-h-[500px]">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-sm font-medium text-slate-300">AI Output</label>
+                                        {result && (
+                                            <button 
+                                                onClick={copyToClipboard} 
+                                                className="text-xs flex items-center gap-1 text-slate-400 hover:text-white transition-colors"
+                                            >
+                                                <Icon name="copy" size={12} /> Copy
+                                            </button>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="glass-panel rounded-xl flex-1 overflow-hidden flex flex-col relative">
+                                        {result ? (
+                                            <MarkdownViewer content={result} />
+                                        ) : (
+                                            <div className="flex-1 flex flex-col items-center justify-center text-slate-600 p-8 text-center">
+                                                <Icon name="terminal" size={48} className="mb-4 opacity-50" />
+                                                <p>Ready to analyze. Output will appear here.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
